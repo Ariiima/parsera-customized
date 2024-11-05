@@ -98,66 +98,38 @@ Merged json:
 
 APPEND_TABULAR_EXTRACTOR_SYSTEM_PROMPT = """
 Your goal is to continue the sequence extracted from the previous chunk of the page by adding elements from the new page
-chunk. Note, that chunks are overlapping, so the data extracted from the previous chunk can appear in the content again,
-in this case always try to find values for the rows based on the content of the truncated page chunk provided by user. 
-Output json should contain all records you observe on the page.
+chunk. For each extracted field, you must extract the EXACT CSS selector from the HTML content that was used to find that element.
+DO NOT make up or guess selectors - only use what's present in the HTML.
 
-## Example: continue truncated json
-Fill missing values, fix truncated values and continue this sequence:
+Important rules for selectors:
+1. Use the most specific and accurate selector from the actual HTML
+2. Include all necessary parent elements to uniquely identify the element
+3. If you can't find a specific selector in the HTML, use null or empty string
+4. Include class names, IDs, and other attributes exactly as they appear in the HTML
+5. Pay attention to the actual HTML structure in the content
+
+## Example: continue truncated json with selectors
 ```json
 [
-    {"name": "zero product", "price": "25"},
-    {"name": "first product", "price": "100"},
-    {"name": "second", "price": null},
+    {
+        "name": {
+            "value": "Product Name",
+            "selector": "div.product__title > h1.product-single__title"
+        },
+        "price": {
+            "value": "25.00",
+            "selector": "span.price-item.price-item--regular"
+        },
+        "description": {
+            "value": "Product description text",
+            "selector": "div.product-single__description.rte"
+        }
+    }
 ]
 ```
 
-Return the following elements from the truncated page chunk:
-```
-{
-    "name": "name of the listing",
-    "price": "price of the listing"
-}
-```
-
-Make sure to fill mussing and truncated values in the previous sequence, while using `null` in the records where data
-was not found. Like in example below, where price for the "fourth product" was not found.
-Output json with fixed previous sequence and new rows:
-```json
-[
-    {"name": "zero product", "price": "25"},
-    {"name": "first product", "price": "100"},
-    {"name": "second product", "price": "100"},
-    {"name": "third product", "price": "150"},
-    {"name": "fourth product", "price": null},
-]
-```
-
-## Example: user asks for single field
-
-User requesting the following elements from the truncated page chunk:
-```
-{
-    "link": "link to the listing",
-}
-```
-Make sure to return json with only this field
-Output json with fixed previous sequence and new rows:
-```json
-[
-    {"link": "https://example.com/link1"},
-    {"link": "https://example.com/link2"},
-    {"link": "https://example.com/link3"},
-]
-```
-
-## Note
-
-If no data is found return empty json:
-```json
-[]
-```
-
+Only extract selectors that you can verify in the provided HTML content.
+If you cannot find a proper selector, use null rather than making one up.
 """
 
 APPEND_EXTRACTOR_PROMPT_TEMPLATE = """
@@ -176,7 +148,8 @@ You are looking for the following elements from the truncated page chunk:
 {elements}
 ```
 
-Output json with fixed previous sequence and new rows:
+For each element, also identify and return the CSS selector that can be used to locate it.
+Output json with fixed previous sequence, new rows, and CSS selectors:
 """
 
 
@@ -242,11 +215,21 @@ class ChunksTabularExtractor(TabularExtractor):
                 markdown=markdown, elements=elements
             )
         else:
-            cutoff = math.ceil(len(previous_data) / self.overlap_factor)
-            previous_tail = json.dumps(previous_data[cutoff:])
+            # Convert previous_data to list if it's not already
+            if not isinstance(previous_data, list):
+                previous_data = list(previous_data)
+            
+            # Ensure we have valid data to slice
+            if len(previous_data) > 0:
+                cutoff = max(1, math.ceil(len(previous_data) / self.overlap_factor))
+                previous_tail = json.dumps(previous_data[-cutoff:])
+            else:
+                previous_tail = "[]"
+            
             human_msg = self.append_prompt_template.format(
                 markdown=markdown, elements=elements, previous_data=previous_tail
             )
+        
         messages = [
             SystemMessage(self.system_prompt),
             HumanMessage(human_msg),
@@ -286,8 +269,13 @@ class ChunksTabularExtractor(TabularExtractor):
         if self.prompt_template is None:
             raise ValueError("prompt_template is not defined for this extractor")
 
-        markdown = self.converter.convert(content)
-        chunks = self.text_splitter.create_documents([markdown])
+        chunks = self.text_splitter.create_documents([content])
+        
+        # Print token count for each chunk using the token_counter from initialization
+        for i, chunk in enumerate(chunks):
+            token_count = self.text_splitter._length_function(chunk.page_content)
+            print(f"Chunk {i + 1} token count: {token_count}")
+
         if len(chunks) > 1:
             self.chunks_data = []
             chunk_data = None

@@ -41,9 +41,8 @@ class Extractor:
         if self.prompt_template is None:
             raise ValueError("prompt_template is not defined for this extractor")
 
-        markdown = self.converter.convert(content)
         elements = json.dumps(attributes)
-        human_msg = self.prompt_template.format(markdown=markdown, elements=elements)
+        human_msg = self.prompt_template.format(markdown=content, elements=elements)
         messages = [
             SystemMessage(self.system_prompt),
             HumanMessage(human_msg),
@@ -53,6 +52,7 @@ class Extractor:
         output_dict = parser.parse(output.content)
 
         return output_dict
+
 
 
 TABULAR_EXTRACTOR_SYSTEM_PROMPT = """
@@ -65,13 +65,22 @@ Return the following elements from the page content:
     "price": "price of the listing"
 }
 ```
-Make sure to return json with the list of corresponding values.
+Make sure to return json with the list of corresponding values and their CSS selectors.
 Output json:
 ```json
 [
-    {"name": "name1", "price": "100"},
-    {"name": "name2", "price": "150"},
-    {"name": "name3", "price": "300"},
+{
+"name": {"value": "name1", "selector": "#item-1 .name"},
+"price": {"value": "100", "selector": "#item-1 .price"}
+},
+{
+"name": {"value": "name2", "selector": "#item-2 .name"},
+"price": {"value": "150", "selector": "#item-2 .price"}
+},
+{
+"name": {"value": "name3", "selector": "#item-3 .name"},
+"price": {"value": "300", "selector": "#item-3 .price"}
+}
 ]
 ```
 
@@ -82,31 +91,18 @@ Return the following elements from the page content:
     "link": "link to the listing",
 }
 ```
-Make sure to return json with only this field
+Make sure to return json with only this field and its selector
 Output json:
 ```json
 [
-    {"link": "https://example.com/link1"},
-    {"link": "https://example.com/link2"},
-    {"link": "https://example.com/link3"},
+   {"link": {"value": "https://example.com/link1", "selector": ".item-1 a"}},
+{"link": {"value": "https://example.com/link2", "selector": ".item-2 a"}},
+{"link": {"value": "https://example.com/link3", "selector": ".item-3 a"}}
 ]
-```
-
-If value for the field is not found use `null` in the json:
-```json
-[
-    {"name": "name1", "price": "100"},
-    {"name": "name2", "price": null},
-    {"name": "name3", "price": "300"},
-]
-```
-
-If no data is found return empty json:
-```json
-[]
 ```
 
 """
+
 
 
 class TabularExtractor(Extractor):
